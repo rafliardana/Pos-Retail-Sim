@@ -1,0 +1,112 @@
+// Prisma Schema - SimRetail POS (Prisma v7)
+// url dikelola di prisma.config.ts, bukan di sini
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  kasir
+  gudang
+  admin
+  owner
+}
+
+enum StatusUser {
+  aktif
+  nonaktif
+}
+
+enum TipeMutasi {
+  masuk
+  keluar
+}
+
+enum StatusTransaksi {
+  pending
+  selesai
+  dibatalkan
+}
+
+model Pengguna {
+  id         Int        @id @default(autoincrement())
+  username   String     @unique
+  password   String
+  nama       String
+  role       Role
+  status     StatusUser @default(aktif)
+  createdAt  DateTime   @default(now())
+
+  transaksi    Transaksi[]
+  mutasiStok   MutasiStok[]
+
+  @@map("pengguna")
+}
+
+model Barang {
+  id         Int      @id @default(autoincrement())
+  nama       String
+  harga      Int
+  stok       Int      @default(0)
+  minStok    Int      @default(5)
+  kategori   String
+  barcode    String?  @unique
+  gambar     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  detailTransaksi DetailTransaksi[]
+  mutasiStok      MutasiStok[]
+
+  @@map("barang")
+}
+
+model Transaksi {
+  id          Int             @id @default(autoincrement())
+  kode        String          @unique
+  penggunaId  Int
+  totalHarga  Int
+  ppn         Int
+  grandTotal  Int
+  status      StatusTransaksi @default(pending)
+  createdAt   DateTime        @default(now())
+
+  pengguna Pengguna          @relation(fields: [penggunaId], references: [id])
+  detail   DetailTransaksi[]
+
+  @@map("transaksi")
+}
+
+model DetailTransaksi {
+  id           Int @id @default(autoincrement())
+  transaksiId  Int
+  barangId     Int
+  jumlah       Int
+  hargaSatuan  Int
+  subtotal     Int
+
+  transaksi Transaksi @relation(fields: [transaksiId], references: [id])
+  barang    Barang    @relation(fields: [barangId], references: [id])
+
+  @@map("detail_transaksi")
+}
+
+model MutasiStok {
+  id          Int        @id @default(autoincrement())
+  barangId    Int
+  penggunaId  Int
+  tipe        TipeMutasi
+  jumlah      Int
+  keterangan  String?
+  createdAt   DateTime   @default(now())
+
+  barang    Barang   @relation(fields: [barangId], references: [id])
+  pengguna  Pengguna @relation(fields: [penggunaId], references: [id])
+
+  @@map("mutasi_stok")
+}
