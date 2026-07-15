@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.0/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-client.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -342,48 +344,30 @@
 
    <script>
     let inventory = [];
-    let stockHistory = [];
 
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
         initDarkMode();
-        loadInventory();
+        await loadInventory();
         initializeStockChart();
         initializeForm();
         initAddProductForm();
-        updateStats();
     });
 
-    // Dark Mode Logic (Sama seperti sebelumnya) ...
     let isDarkMode = localStorage.getItem('darkMode') === 'true';
     function initDarkMode() { if (isDarkMode) { document.body.classList.add('dark-mode'); updateDarkModeIcon(true); } else { updateDarkModeIcon(false); } }
     function toggleDarkMode() { isDarkMode = !isDarkMode; document.body.classList.toggle('dark-mode'); localStorage.setItem('darkMode', isDarkMode); updateDarkModeIcon(isDarkMode); }
     function updateDarkModeIcon(isDark) { const icon = document.getElementById('toggle-icon'); icon.innerHTML = isDark ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>' : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>'; }
 
-    // --- GUDANG LOGIC (DATA DISAMAKAN) ---
-    function loadInventory() {
-        // Data Sama dengan Kasir (dengan gambar dari resources)
-        inventory = [
-            { id: 1, name: 'Indomie Goreng', stock: 150, minStock: 20, image: 'resources/indomie-goreng.jpg' },
-            { id: 2, name: 'Teh Botol Sosro', stock: 200, minStock: 30, image: 'resources/teh-sosro.jpg' },
-            { id: 3, name: 'Sabun Lifebuoy', stock: 80, minStock: 10, image: 'resources/sabun-lifebuoy.jpg' },
-            { id: 4, name: 'Beras 5kg', stock: 40, minStock: 5, image: 'resources/beras-5-kg.jpg' },
-            { id: 5, name: 'Minyak Goreng 1L', stock: 90, minStock: 15, image: 'resources/minyak-bimoli.jpg' }
-        ];
-        renderInventory(inventory);
-        populateProductSelect();
-        
-        // Load Dummy History yang Sesuai
-        const timeline = document.getElementById('stock-timeline');
-        timeline.innerHTML = `
-            <div class="timeline-item">
-                <p class="text-sm text-gray-800 font-medium">Beras 5kg (Keluar)</p>
-                <p class="text-xs text-gray-500">10:00 - 5 unit</p>
-            </div>
-            <div class="timeline-item">
-                <p class="text-sm text-gray-800 font-medium">Indomie Goreng (Masuk)</p>
-                <p class="text-xs text-gray-500">08:30 - 50 unit</p>
-            </div>
-        `;
+    async function loadInventory() {
+        try {
+            inventory = await getBarang();
+            renderInventory(inventory);
+            populateProductSelect();
+            updateStats();
+            await loadMutasiHistory();
+        } catch (err) {
+            showToast('Gagal memuat inventori: ' + err.message, 'error');
+        }
     }
 
     function renderInventory(items) {
@@ -392,33 +376,35 @@
         items.forEach(item => {
             const div = document.createElement('div');
             div.className = 'inventory-item relative';
-            const imgHtml = (item.image && String(item.image).trim())
-                ? `<div class="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-600 mb-2 flex-shrink-0"><img src="${item.image}" alt="${String(item.name).replace(/"/g, '&quot;')}" class="w-full h-full object-cover block" loading="lazy"></div>`
-                : `<div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center mb-2 flex-shrink-0"><svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></div>`;
+            const imgHtml = item.gambar
+                ? `<div class="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-600 mb-2 flex-shrink-0"><img src="${item.gambar}" alt="${item.nama}" class="w-full h-full object-cover block" loading="lazy"></div>`
+                : `<div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center mb-2 flex-shrink-0"><span class="text-gray-500 font-bold">${item.nama[0]}</span></div>`;
             div.innerHTML = `
                 <button type="button" onclick="deleteProduct(${item.id}); event.stopPropagation();" class="absolute top-2 right-2 p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-gray-600 dark:hover:text-red-400 transition" title="Hapus produk">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                 </button>
                 ${imgHtml}
-                <h4 class="font-semibold text-gray-800 pr-8">${item.name}</h4>
+                <h4 class="font-semibold text-gray-800 pr-8">${item.nama}</h4>
                 <div class="flex justify-between mt-2">
                     <span class="text-sm text-gray-600">Stok:</span>
-                    <span class="font-medium ${item.stock < item.minStock ? 'text-red-500' : 'text-green-600'}">${item.stock}</span>
+                    <span class="font-medium ${item.stok < item.minStok ? 'text-red-500' : 'text-green-600'}">${item.stok}</span>
                 </div>
-                <div class="text-xs text-gray-400 mt-1">Min: ${item.minStock}</div>
+                <div class="text-xs text-gray-400 mt-1">Min: ${item.minStok}</div>
             `;
             grid.appendChild(div);
         });
     }
 
-    function deleteProduct(id) {
+    async function deleteProduct(id) {
         const item = inventory.find(i => i.id == id);
-        if (!item) return;
-        if (!confirm('Hapus produk "' + item.name + '" dari inventori?')) return;
-        inventory = inventory.filter(i => i.id != id);
-        renderInventory(inventory);
-        populateProductSelect();
-        updateStats();
+        if (!item || !confirm(`Hapus produk "${item.nama}" dari inventori?`)) return;
+        try {
+            await deleteBarang(id);
+            await loadInventory();
+            showToast('Produk dihapus', 'success');
+        } catch (err) {
+            showToast('Gagal hapus: ' + err.message, 'error');
+        }
     }
 
     function populateProductSelect() {
@@ -427,52 +413,54 @@
         inventory.forEach(item => {
             const opt = document.createElement('option');
             opt.value = item.id;
-            opt.textContent = item.name;
+            opt.textContent = item.nama;
             select.appendChild(opt);
         });
     }
 
     function initializeForm() {
-        document.getElementById('stock-form').addEventListener('submit', (e) => {
+        document.getElementById('stock-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const qty = parseInt(document.getElementById('quantity').value);
             const type = document.getElementById('transaction-type').value;
-            const prodId = document.getElementById('product-select').value;
-            
+            const prodId = parseInt(document.getElementById('product-select').value);
             if (!prodId) { alert('Silakan pilih produk'); return; }
+
             const prod = inventory.find(i => i.id == prodId);
-            
-            if(prod) {
-                if(type === 'in') prod.stock += qty;
-                else {
-                    if(prod.stock >= qty) prod.stock -= qty;
-                    else { alert('Stok tidak cukup!'); return; }
-                }
-                
-                renderInventory(inventory);
-                updateStats();
-                alert('Transaksi Berhasil');
-                
-                // Add new history entry to top (format HH:mm seperti dummy: 10:00, 08:30)
-                const timeline = document.getElementById('stock-timeline');
-                const d = new Date();
-                const timeStr = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-                const historyItem = document.createElement('div');
-                historyItem.className = 'timeline-item';
-                historyItem.innerHTML = `
-                    <p class="text-sm text-gray-800 font-medium">${prod.name} (${type === 'in' ? 'Masuk' : 'Keluar'})</p>
-                    <p class="text-xs text-gray-500">${timeStr} - ${qty} unit</p>
-                `;
-                timeline.insertBefore(historyItem, timeline.firstChild);
-                
+            if (!prod) return;
+            if (type === 'keluar' && prod.stok < qty) { alert('Stok tidak cukup!'); return; }
+
+            try {
+                const user = getCurrentUser();
+                const penggunaId = user?.id || 3; // fallback gudang
+                await addMutasiStok(prodId, penggunaId, type === 'in' ? 'masuk' : 'keluar', qty);
+                await loadInventory();
                 document.getElementById('quantity').value = '';
+                showToast('Mutasi stok berhasil', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
             }
         });
     }
 
     function updateStats() {
         document.getElementById('total-products').textContent = inventory.length;
-        document.getElementById('safe-stock').textContent = inventory.filter(i => i.stock > i.minStock).length;
+        document.getElementById('safe-stock').textContent = inventory.filter(i => i.stok > i.minStok).length;
+    }
+
+    async function loadMutasiHistory() {
+        const timeline = document.getElementById('stock-timeline');
+        try {
+            const mutasi = await getMutasiStok(5);
+            if (!mutasi.length) { timeline.innerHTML = '<p class="text-xs text-gray-400">Belum ada riwayat</p>'; return; }
+            timeline.innerHTML = mutasi.map(m => {
+                const time = new Date(m.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                return `<div class="timeline-item">
+                    <p class="text-sm text-gray-800 font-medium">${m.barang?.nama || '-'} (${m.tipe === 'masuk' ? 'Masuk' : 'Keluar'})</p>
+                    <p class="text-xs text-gray-500">${time} - ${m.jumlah} unit</p>
+                </div>`;
+            }).join('');
+        } catch { timeline.innerHTML = '<p class="text-xs text-gray-400">-</p>'; }
     }
 
     // --- Menambah Produk ---
@@ -493,12 +481,8 @@
         const fileInput = document.getElementById('new-product-image');
         const modal = document.getElementById('add-product-modal');
 
-        modal.addEventListener('click', function(e) {
-            if (e.target === modal) closeAddProductModal();
-        });
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && modal.classList.contains('show')) closeAddProductModal();
-        });
+        modal.addEventListener('click', function(e) { if (e.target === modal) closeAddProductModal(); });
+        document.addEventListener('keydown', function(e) { if (e.key === 'Escape' && modal.classList.contains('show')) closeAddProductModal(); });
 
         fileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
@@ -513,35 +497,21 @@
             }
         });
 
-        form.addEventListener('submit', function(e) {
+        form.addEventListener('submit', async function(e) {
             e.preventDefault();
-            const name = document.getElementById('new-product-name').value.trim();
-            const stock = parseInt(document.getElementById('new-product-stock').value) || 0;
-            const minStock = parseInt(document.getElementById('new-product-minstock').value) || 0;
-            const price = parseInt(document.getElementById('new-product-price').value) || 0;
-            const category = document.getElementById('new-product-category').value;
-            const fileInput = document.getElementById('new-product-image');
-            let imageData = null;
+            const nama     = document.getElementById('new-product-name').value.trim();
+            const stok     = parseInt(document.getElementById('new-product-stock').value) || 0;
+            const minStok  = parseInt(document.getElementById('new-product-minstock').value) || 0;
+            const harga    = parseInt(document.getElementById('new-product-price').value) || 0;
+            const kategori = document.getElementById('new-product-category').value;
 
-            function doAdd() {
-                const newId = inventory.length ? Math.max(...inventory.map(i => i.id)) + 1 : 1;
-                const newProduct = { id: newId, name, stock, minStock, price, category, image: imageData };
-                inventory.push(newProduct);
-                renderInventory(inventory);
-                populateProductSelect();
-                updateStats();
+            try {
+                await createBarang({ nama, stok, minStok, harga, kategori });
+                await loadInventory();
                 closeAddProductModal();
-                alert('Produk berhasil ditambahkan!');
-            }
-            if (fileInput.files[0]) {
-                const reader = new FileReader();
-                reader.onload = function(ev) {
-                    imageData = ev.target.result;
-                    doAdd();
-                };
-                reader.readAsDataURL(fileInput.files[0]);
-            } else {
-                doAdd();
+                showToast('Produk berhasil ditambahkan!', 'success');
+            } catch (err) {
+                showToast('Gagal: ' + err.message, 'error');
             }
         });
     }

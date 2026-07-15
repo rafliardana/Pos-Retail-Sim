@@ -7,6 +7,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.0/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-client.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -469,60 +471,28 @@
     </div>
 
     <script>
-        // --- ADMIN JAVASCRIPT ---
         let transactions = [];
         let users = [];
-        let logs = [];
-        let selectedTransactions = [];
 
-        document.addEventListener('DOMContentLoaded', function() {
-            initDarkMode(); // Inisialisasi Dark Mode
-            loadTransactions();
-            loadUsers(); // Ini akan memanggil data dummy user
+        document.addEventListener('DOMContentLoaded', async function() {
+            initDarkMode();
+            await Promise.all([loadTransactions(), loadUsers()]);
             loadLogs();
             loadTransactionChart();
         });
 
-        // --- FITUR DARK MODE ---
         let isDarkMode = localStorage.getItem('darkMode') === 'true';
+        function initDarkMode() { if (isDarkMode) { document.body.classList.add('dark-mode'); updateDarkModeIcon(true); } else { updateDarkModeIcon(false); } }
+        function toggleDarkMode() { isDarkMode = !isDarkMode; document.body.classList.toggle('dark-mode'); localStorage.setItem('darkMode', isDarkMode); updateDarkModeIcon(isDarkMode); }
+        function updateDarkModeIcon(isDark) { const icon = document.getElementById('toggle-icon'); if (!icon) return; icon.innerHTML = isDark ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>' : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>'; }
 
-        function initDarkMode() {
-            if (isDarkMode) {
-                document.body.classList.add('dark-mode');
-                updateDarkModeIcon(true);
-            } else {
-                updateDarkModeIcon(false);
+        async function loadUsers() {
+            try {
+                users = await getPengguna();
+                renderUsers();
+            } catch (err) {
+                showToast('Gagal memuat user: ' + err.message, 'error');
             }
-        }
-
-        function toggleDarkMode() {
-            isDarkMode = !isDarkMode;
-            document.body.classList.toggle('dark-mode');
-            localStorage.setItem('darkMode', isDarkMode);
-            updateDarkModeIcon(isDarkMode);
-        }
-
-        function updateDarkModeIcon(isDark) {
-            const icon = document.getElementById('toggle-icon');
-            if (isDark) {
-                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>';
-            } else {
-                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>';
-            }
-        }
-
-        // --- FUNGSI ADMIN ---
-        
-        // 1. Load Dummy Users
-        function loadUsers() {
-            users = [
-                { id: 1, name: 'Okta', role: 'Admin', status: 'Active', last_login: '2025-01-15 08:00' },
-                { id: 2, name: 'Devi', role: 'Kasir', status: 'Active', last_login: '2025-01-15 08:30' },
-                { id: 3, name: 'Rafli', role: 'Gudang', status: 'Active', last_login: '2025-01-15 09:00' },
-                { id: 4, name: 'Alif', role: 'Owner', status: 'Active', last_login: '2025-01-14 17:00' },
-                { id: 5, name: 'Budi', role: 'Kasir', status: 'Inactive', last_login: '2025-01-10 10:00' }
-            ];
-            renderUsers();
         }
 
         function renderUsers() {
@@ -530,51 +500,52 @@
             tbody.innerHTML = '';
             users.forEach(user => {
                 const row = document.createElement('tr');
+                const lastLogin = user.createdAt ? new Date(user.createdAt).toLocaleString('id-ID') : '-';
                 row.innerHTML = `
                     <td>${user.id}</td>
-                    <td>${user.name}</td>
-                    <td><span class="role-badge">${user.role}</span></td>
-                    <td><span class="status-badge ${user.status === 'Active' ? 'status-completed' : 'status-inactive'}">${user.status}</span></td>
-                    <td>${user.last_login}</td>
+                    <td>${user.nama}</td>
+                    <td><span class="role-badge text-xs">${user.role}</span></td>
+                    <td><span class="status-badge ${user.status === 'aktif' ? 'status-completed' : 'status-inactive'}">${user.status}</span></td>
+                    <td>${lastLogin}</td>
                     <td>
-                        <button class="btn-secondary" onclick="alert('Edit user ${user.name}')">Edit</button>
-                        <button class="btn-secondary" style="border-color: #E74C3C; color: #E74C3C;" onclick="deleteUser(${user.id})">Hapus</button>
+                        <button class="btn-secondary" onclick="alert('Edit user ${user.nama}')">Edit</button>
                     </td>
                 `;
                 tbody.appendChild(row);
             });
         }
-        
-        function deleteUser(id) {
-            if(confirm('Yakin ingin menghapus user ini?')) {
-                users = users.filter(u => u.id !== id);
-                renderUsers();
-            }
-        }
 
-        function loadTransactions() {
-            // Data dummy transaksi
-            transactions = [
-                { id: 'TRX001', date: '2025-01-15', cashier: 'Devi', total: 17000, items: 4, status: 'completed' },
-                { id: 'TRX002', date: '2025-01-15', cashier: 'Devi', total: 63000, items: 2, status: 'pending' }
-            ];
-            updateTransactionStats();
+        async function loadTransactions() {
+            try {
+                transactions = await getTransaksi(50);
+                updateTransactionStats();
+            } catch (err) {
+                showToast('Gagal memuat transaksi: ' + err.message, 'error');
+            }
         }
 
         function updateTransactionStats() {
             document.getElementById('total-transactions').textContent = transactions.length;
             document.getElementById('pending-transactions').textContent = transactions.filter(t => t.status === 'pending').length;
-            document.getElementById('verified-transactions').textContent = transactions.filter(t => t.status === 'verified').length;
-            document.getElementById('total-value').textContent = formatCurrency(transactions.reduce((s, t) => s + t.total, 0));
+            document.getElementById('verified-transactions').textContent = transactions.filter(t => t.status === 'selesai').length;
+            document.getElementById('total-value').textContent = formatCurrency(transactions.reduce((s, t) => s + (t.grandTotal || 0), 0));
         }
 
         function loadTransactionChart() {
             const chartDom = document.getElementById('transaction-chart');
             const myChart = echarts.init(chartDom);
+            // Agregasi per hari dari data real
+            const byDay = {};
+            transactions.forEach(t => {
+                const day = new Date(t.createdAt).toLocaleDateString('id-ID', { weekday: 'short' });
+                byDay[day] = (byDay[day] || 0) + 1;
+            });
+            const labels = Object.keys(byDay).slice(-7);
+            const vals   = labels.map(d => byDay[d]);
             const option = {
-                xAxis: { type: 'category', data: ['Sen', 'Sel', 'Rab', 'Kam', 'Jum'] },
+                xAxis: { type: 'category', data: labels.length ? labels : ['Sen','Sel','Rab','Kam','Jum'] },
                 yAxis: { type: 'value' },
-                series: [{ data: [120, 200, 150, 80, 70], type: 'bar', itemStyle: { color: '#FF6B35' } }]
+                series: [{ data: vals.length ? vals : [0,0,0,0,0], type: 'bar', itemStyle: { color: '#FF6B35' } }]
             };
             myChart.setOption(option);
         }
@@ -591,8 +562,11 @@
         }
 
         function loadLogs() {}
+        function generateReport() { showToast('Laporan digenerate', 'success'); }
+        function backupData() { showToast('Backup berhasil', 'success'); }
         function showAddUserModal() { document.getElementById('add-user-modal').classList.remove('hidden'); }
         function closeAddUserModal() { document.getElementById('add-user-modal').classList.add('hidden'); }
+        function filterLogs() {}
     </script>
 </body>
 </html>

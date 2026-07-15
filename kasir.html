@@ -8,6 +8,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.18.0/matter.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-client.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -168,17 +170,19 @@
     <script>
         let cart = [];
         let products = [];
-        let currentTransactionId = "";
-        let transactionsList = JSON.parse(localStorage.getItem('transactionsList')) || [
-            { id: 'TRX001', time: '10:30', total: 52000, status: 'Selesai' },
-            { id: 'TRX002', time: '11:15', total: 45000, status: 'Selesai' }
-        ];
+        let currentTransactionId = '';
+        let currentReceiptData = null;
 
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             initDarkMode();
-            loadProducts();
-            loadTransactionHistory();
             renderCart();
+            await loadProducts();
+            await loadTransactionHistory();
+
+            // Search realtime
+            document.getElementById('product-search').addEventListener('input', async (e) => {
+                await loadProducts(e.target.value.trim());
+            });
         });
 
         let isDarkMode = localStorage.getItem('darkMode') === 'true';
@@ -186,32 +190,33 @@
         function toggleDarkMode() { isDarkMode = !isDarkMode; document.body.classList.toggle('dark-mode'); localStorage.setItem('darkMode', isDarkMode); updateDarkModeIcon(isDarkMode); }
         function updateDarkModeIcon(isDark) { const icon = document.getElementById('toggle-icon'); icon.innerHTML = isDark ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>' : '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>'; }
 
-        function loadProducts() {
-            products = [
-                { id: 1, name: 'Indomie Goreng', price: 3500, stock: 150, image: 'resources/indomie-goreng.jpg' },
-                { id: 2, name: 'Teh Botol Sosro', price: 5000, stock: 200, image: 'resources/teh-sosro.jpg' },
-                { id: 3, name: 'Sabun Lifebuoy', price: 8000, stock: 80, image: 'resources/sabun-lifebuoy.jpg' },
-                { id: 4, name: 'Beras 5kg', price: 45000, stock: 40, image: 'resources/beras-5-kg.jpg' },
-                { id: 5, name: 'Minyak Goreng 1L', price: 18000, stock: 90, image: 'resources/minyak-bimoli.jpg' }
-            ];
-            renderProducts(products);
+        async function loadProducts(search = '') {
+            const grid = document.getElementById('product-grid');
+            grid.innerHTML = '<div class="col-span-full text-center text-gray-400 py-8">Memuat produk...</div>';
+            try {
+                products = await getBarang(search);
+                renderProducts(products);
+            } catch (err) {
+                grid.innerHTML = `<div class="col-span-full text-center text-red-400 py-8">Gagal memuat: ${err.message}</div>`;
+            }
         }
 
         function renderProducts(items) {
             const grid = document.getElementById('product-grid');
+            if (!items.length) { grid.innerHTML = '<div class="col-span-full text-center text-gray-400 py-8">Tidak ada produk</div>'; return; }
             grid.innerHTML = '';
-            items.forEach(product => {
+            items.forEach(p => {
                 const card = document.createElement('div');
                 card.className = 'product-card';
-                card.onclick = () => addToCart(product);
+                card.onclick = () => addToCart(p);
                 card.innerHTML = `
                     <div class="mb-3 h-32 bg-gray-100 rounded-lg overflow-hidden">
-                        <img src="${product.image}" class="w-full h-full object-cover" onerror="this.src='data:image/svg+xml;utf8,<svg...>'">
+                        <img src="${p.gambar || ''}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<div class=\'w-full h-full flex items-center justify-center text-gray-400 text-xs\'>' + (p.nama[0]||'?') + '</div>'">
                     </div>
-                    <h4 class="font-semibold text-gray-800">${product.name}</h4>
+                    <h4 class="font-semibold text-gray-800 text-sm">${p.nama}</h4>
                     <div class="flex justify-between items-center mt-2">
-                        <span class="text-orange-600 font-bold">${formatCurrency(product.price)}</span>
-                        <span class="text-xs text-gray-500">Stok: ${product.stock}</span>
+                        <span class="text-orange-600 font-bold text-sm">${formatCurrency(p.harga)}</span>
+                        <span class="text-xs ${p.stok <= p.minStok ? 'text-red-500 font-semibold' : 'text-gray-500'}">Stok: ${p.stok}</span>
                     </div>
                 `;
                 grid.appendChild(card);
@@ -219,8 +224,14 @@
         }
 
         function addToCart(product) {
+            if (product.stok <= 0) { showToast('Stok habis!', 'error'); return; }
             const existing = cart.find(i => i.id === product.id);
-            if (existing) { existing.quantity++; } else { cart.push({ ...product, quantity: 1 }); }
+            if (existing) {
+                if (existing.quantity >= product.stok) { showToast('Stok tidak cukup!', 'warning'); return; }
+                existing.quantity++;
+            } else {
+                cart.push({ ...product, quantity: 1 });
+            }
             renderCart(); updateCartSummary();
         }
 
@@ -229,20 +240,26 @@
             if (cart.length === 0) { container.innerHTML = '<div class="text-center text-gray-500 py-8">Keranjang Kosong</div>'; return; }
             container.innerHTML = cart.map(item => `
                 <div class="cart-item">
-                    <div class="flex justify-between mb-2">
-                        <span class="text-sm font-medium text-gray-800">${item.name}</span>
-                        <span class="text-sm">${formatCurrency(item.price * item.quantity)}</span>
+                    <div class="flex justify-between mb-1">
+                        <span class="text-sm font-medium text-gray-800">${item.nama}</span>
+                        <button onclick="removeFromCart(${item.id})" class="text-red-400 hover:text-red-600 text-xs">✕</button>
                     </div>
                     <div class="flex justify-between items-center">
-                        <span class="text-xs text-gray-500">${formatCurrency(item.price)} x ${item.quantity}</span>
+                        <span class="text-xs text-gray-500">${formatCurrency(item.harga)} x ${item.quantity}</span>
+                        <span class="text-sm font-semibold">${formatCurrency(item.harga * item.quantity)}</span>
                     </div>
                 </div>
             `).join('');
         }
 
+        function removeFromCart(id) {
+            cart = cart.filter(i => i.id !== id);
+            renderCart(); updateCartSummary();
+        }
+
         function updateCartSummary() {
-            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const tax = subtotal * 0.1;
+            const subtotal = cart.reduce((s, i) => s + i.harga * i.quantity, 0);
+            const tax = Math.round(subtotal * 0.1);
             const total = subtotal + tax;
             document.getElementById('subtotal').textContent = formatCurrency(subtotal);
             document.getElementById('tax').textContent = formatCurrency(tax);
@@ -252,132 +269,84 @@
 
         function clearCart() { cart = []; renderCart(); updateCartSummary(); }
 
-        function processPayment() {
-            const total = document.getElementById('total').textContent;
-            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-            const rawTotal = subtotal * 1.1; // Total + PPN 10%
-            
-            // Generate Random ID Transaksi
-            const date = new Date();
-            currentTransactionId = "TRX" + date.getFullYear() + String(date.getMonth()+1).padStart(2, '0') + String(date.getDate()).padStart(2, '0') + "-" + Math.floor(1000 + Math.random() * 9000);
+        async function processPayment() {
+            const btn = document.getElementById('payment-btn');
+            btn.disabled = true;
+            btn.textContent = 'Memproses...';
+            try {
+                const user = getCurrentUser();
+                const penggunaId = user?.id || 1; // fallback ke ID 1 jika belum ada sesi
+                const items = cart.map(i => ({ barangId: i.id, jumlah: i.quantity }));
 
-            // Update UI Modal Preview
-            const detailsDiv = document.getElementById('receipt-screen-details');
-            detailsDiv.innerHTML = `
-                <div class="flex justify-between text-sm text-gray-600">
-                    <span>ID Transaksi:</span>
-                    <span class="font-bold">${currentTransactionId}</span>
-                </div>
-                <div class="flex justify-between text-sm text-gray-600">
-                    <span>Waktu:</span>
-                    <span>${date.toLocaleTimeString()}</span>
-                </div>
-                <div class="border-t border-dashed border-gray-300 my-2 pt-2">
-                    <div class="flex justify-between text-lg font-bold text-gray-800">
-                        <span>Total Bayar:</span>
-                        <span class="text-orange-600">${total}</span>
+                const result = await createTransaksi(penggunaId, items);
+                currentTransactionId = result.kode;
+                currentReceiptData = result;
+
+                const date = new Date();
+                const detailsDiv = document.getElementById('receipt-screen-details');
+                detailsDiv.innerHTML = `
+                    <div class="flex justify-between text-sm text-gray-600">
+                        <span>ID Transaksi:</span>
+                        <span class="font-bold">${result.kode}</span>
                     </div>
-                </div>
-            `;
+                    <div class="flex justify-between text-sm text-gray-600">
+                        <span>Waktu:</span>
+                        <span>${date.toLocaleTimeString('id-ID')}</span>
+                    </div>
+                    <div class="border-t border-dashed border-gray-300 my-2 pt-2">
+                        <div class="flex justify-between text-lg font-bold text-gray-800">
+                            <span>Total Bayar:</span>
+                            <span class="text-orange-600">${formatCurrency(result.grandTotal)}</span>
+                        </div>
+                    </div>
+                `;
 
-            // Simpan transaksi baru ke list
-            const timeStr = String(date.getHours()).padStart(2, '0') + ":" + String(date.getMinutes()).padStart(2, '0');
-            transactionsList.unshift({
-                id: currentTransactionId,
-                time: timeStr,
-                total: rawTotal,
-                status: 'Selesai'
-            });
-            localStorage.setItem('transactionsList', JSON.stringify(transactionsList));
-            loadTransactionHistory();
-
-            document.getElementById('receipt-modal').classList.remove('hidden');
+                document.getElementById('receipt-modal').classList.remove('hidden');
+                await loadTransactionHistory();
+                await loadProducts(document.getElementById('product-search').value);
+            } catch (err) {
+                showToast(err.message || 'Transaksi gagal!', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Bayar';
+            }
         }
 
         // --- FUNGSI CETAK PDF ---
         function generateReceiptPDF() {
             const { jsPDF } = window.jspdf;
-            
-            // Ukuran kertas struk thermal 58mm (lebar 58mm, tinggi dinamis/auto)
-            const doc = new jsPDF({
-                orientation: 'portrait',
-                unit: 'mm',
-                format: [58, 120] // Lebar 58mm, Tinggi Estimasi
-            });
+            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [58, 120] });
+            const user = getCurrentUser();
 
-            // Setting Font
-            doc.setFont("courier", "bold");
-            doc.setFontSize(10);
-            
-            // Header
+            doc.setFont('courier', 'bold'); doc.setFontSize(10);
             let y = 10;
-            doc.text("RETAILSIM STORE", 29, y, { align: "center" });
-            y += 4;
-            doc.setFont("courier", "normal");
-            doc.setFontSize(8);
-            doc.text("Jl. Teknologi No. 123, Batam", 29, y, { align: "center" });
-            y += 4;
-            doc.text("--------------------------------", 29, y, { align: "center" });
-            y += 4;
+            doc.text('RETAILSIM STORE', 29, y, { align: 'center' }); y += 4;
+            doc.setFont('courier', 'normal'); doc.setFontSize(8);
+            doc.text('Jl. Teknologi No. 123, Batam', 29, y, { align: 'center' }); y += 4;
+            doc.text('--------------------------------', 29, y, { align: 'center' }); y += 4;
+            doc.text(`ID: ${currentTransactionId}`, 2, y); y += 4;
+            doc.text(`Tgl: ${new Date().toLocaleString('id-ID')}`, 2, y); y += 4;
+            doc.text(`Kasir: ${user?.nama || 'Kasir'}`, 2, y); y += 4;
+            doc.text('--------------------------------', 29, y, { align: 'center' }); y += 4;
 
-            // Info Transaksi
-            doc.text(`ID: ${currentTransactionId}`, 2, y);
-            y += 4;
-            doc.text(`Tgl: ${new Date().toLocaleString()}`, 2, y);
-            y += 4;
-            doc.text(`Kasir: Devi`, 2, y);
-            y += 4;
-            doc.text("--------------------------------", 29, y, { align: "center" });
-            y += 4;
-
-            // Item List
             let subtotal = 0;
             cart.forEach(item => {
-                const totalItem = item.price * item.quantity;
-                subtotal += totalItem;
-                
-                // Nama Produk
-                let name = item.name;
-                if (name.length > 20) name = name.substring(0, 20) + "...";
-                doc.text(name, 2, y);
-                y += 4;
-                
-                // Qty x Harga = Total
-                const line = `${item.quantity} x ${item.price.toLocaleString()} = ${totalItem.toLocaleString()}`;
-                doc.text(line, 56, y, { align: "right" });
-                y += 4;
+                const tot = item.harga * item.quantity; subtotal += tot;
+                let name = item.nama; if (name.length > 20) name = name.substring(0, 20) + '...';
+                doc.text(name, 2, y); y += 4;
+                doc.text(`${item.quantity} x ${item.harga.toLocaleString()} = ${tot.toLocaleString()}`, 56, y, { align: 'right' }); y += 4;
             });
 
-            // Totals
-            doc.text("--------------------------------", 29, y, { align: "center" });
-            y += 4;
-            
-            const tax = subtotal * 0.1;
+            const tax = Math.round(subtotal * 0.1);
             const total = subtotal + tax;
-
-            doc.text("Subtotal:", 2, y);
-            doc.text(subtotal.toLocaleString(), 56, y, { align: "right" });
-            y += 4;
-
-            doc.text("PPN (10%):", 2, y);
-            doc.text(tax.toLocaleString(), 56, y, { align: "right" });
-            y += 4;
-
-            doc.setFont("courier", "bold");
-            doc.text("TOTAL:", 2, y);
-            doc.text(`Rp ${total.toLocaleString()}`, 56, y, { align: "right" });
-            y += 8;
-
-            // Footer
-            doc.setFont("courier", "normal");
-            doc.setFontSize(8);
-            doc.text("Terima Kasih", 29, y, { align: "center" });
-            y += 4;
-            doc.text("Barang yang dibeli", 29, y, { align: "center" });
-            y += 4;
-            doc.text("tidak dapat dikembalikan", 29, y, { align: "center" });
-
-            // Simpan PDF
+            doc.text('--------------------------------', 29, y, { align: 'center' }); y += 4;
+            doc.text('Subtotal:', 2, y); doc.text(subtotal.toLocaleString(), 56, y, { align: 'right' }); y += 4;
+            doc.text('PPN (10%):', 2, y); doc.text(tax.toLocaleString(), 56, y, { align: 'right' }); y += 4;
+            doc.setFont('courier', 'bold');
+            doc.text('TOTAL:', 2, y); doc.text(`Rp ${total.toLocaleString()}`, 56, y, { align: 'right' }); y += 8;
+            doc.setFont('courier', 'normal');
+            doc.text('Terima Kasih', 29, y, { align: 'center' }); y += 4;
+            doc.text('Barang yang dibeli tidak dapat dikembalikan', 29, y, { align: 'center' });
             doc.save(`Struk-${currentTransactionId}.pdf`);
         }
 
@@ -386,18 +355,23 @@
             clearCart();
         }
 
-        function loadTransactionHistory() {
+        async function loadTransactionHistory() {
             const container = document.getElementById('transaction-history');
-            container.innerHTML = transactionsList.map(trx => `
-                <tr class="border-b hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td class="py-2">${trx.id}</td>
-                    <td>${trx.time}</td>
-                    <td class="text-right">${formatCurrency(trx.total)}</td>
-                    <td class="text-center">
-                        <span class="bg-green-100 text-green-800 px-2 rounded-full text-xs">${trx.status}</span>
-                    </td>
-                </tr>
-            `).join('');
+            try {
+                const trxList = await getTransaksi(10);
+                container.innerHTML = trxList.map(trx => {
+                    const time = new Date(trx.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                    const statusClass = trx.status === 'selesai' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800';
+                    return `<tr class="border-b hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td class="py-2 text-xs">${trx.kode}</td>
+                        <td class="text-xs">${time}</td>
+                        <td class="text-right text-xs">${formatCurrency(trx.grandTotal)}</td>
+                        <td class="text-center"><span class="${statusClass} px-2 rounded-full text-xs">${trx.status}</span></td>
+                    </tr>`;
+                }).join('');
+            } catch (err) {
+                container.innerHTML = `<tr><td colspan="4" class="text-center text-red-400 py-4">${err.message}</td></tr>`;
+            }
         }
 
         function formatCurrency(val) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val); }
