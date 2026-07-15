@@ -169,6 +169,10 @@
         let cart = [];
         let products = [];
         let currentTransactionId = "";
+        let transactionsList = JSON.parse(localStorage.getItem('transactionsList')) || [
+            { id: 'TRX001', time: '10:30', total: 52000, status: 'Selesai' },
+            { id: 'TRX002', time: '11:15', total: 45000, status: 'Selesai' }
+        ];
 
         document.addEventListener('DOMContentLoaded', function() {
             initDarkMode();
@@ -250,6 +254,8 @@
 
         function processPayment() {
             const total = document.getElementById('total').textContent;
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const rawTotal = subtotal * 1.1; // Total + PPN 10%
             
             // Generate Random ID Transaksi
             const date = new Date();
@@ -273,6 +279,17 @@
                     </div>
                 </div>
             `;
+
+            // Simpan transaksi baru ke list
+            const timeStr = String(date.getHours()).padStart(2, '0') + ":" + String(date.getMinutes()).padStart(2, '0');
+            transactionsList.unshift({
+                id: currentTransactionId,
+                time: timeStr,
+                total: rawTotal,
+                status: 'Selesai'
+            });
+            localStorage.setItem('transactionsList', JSON.stringify(transactionsList));
+            loadTransactionHistory();
 
             document.getElementById('receipt-modal').classList.remove('hidden');
         }
@@ -371,10 +388,16 @@
 
         function loadTransactionHistory() {
             const container = document.getElementById('transaction-history');
-            container.innerHTML = `
-                <tr class="border-b hover:bg-gray-50 dark:hover:bg-gray-700"><td class="py-2">TRX001</td><td>10:30</td><td class="text-right">Rp 52.000</td><td class="text-center"><span class="bg-green-100 text-green-800 px-2 rounded-full text-xs">Selesai</span></td></tr>
-                <tr class="border-b hover:bg-gray-50 dark:hover:bg-gray-700"><td class="py-2">TRX002</td><td>11:15</td><td class="text-right">Rp 45.000</td><td class="text-center"><span class="bg-green-100 text-green-800 px-2 rounded-full text-xs">Selesai</span></td></tr>
-            `;
+            container.innerHTML = transactionsList.map(trx => `
+                <tr class="border-b hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="py-2">${trx.id}</td>
+                    <td>${trx.time}</td>
+                    <td class="text-right">${formatCurrency(trx.total)}</td>
+                    <td class="text-center">
+                        <span class="bg-green-100 text-green-800 px-2 rounded-full text-xs">${trx.status}</span>
+                    </td>
+                </tr>
+            `).join('');
         }
 
         function formatCurrency(val) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val); }
